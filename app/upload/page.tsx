@@ -111,8 +111,7 @@ export default function PredictionPage() {
   const handleUploadClick = () => {
     fileInputRef.current?.click();
   };
-
-  // --- UPDATED Function: Fetch Disease Info using Gemini ---
+  // --- UPDATED Function: Fetch Disease Info using Backend ---
   const fetchDiseaseInfo = async (diseaseName: string) => {
     if (diseaseName.toLowerCase().includes("healthy")) {
       setDiseaseInfo({
@@ -126,82 +125,26 @@ export default function PredictionPage() {
     setInfoError(null);
     setDiseaseInfo(null);
 
-    // --- Gemini API Configuration ---
-    const apiKey = env.googleAPI; // Leave empty - Canvas provides it
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-    const systemPrompt =
-      "You are an expert plant pathologist. For the given plant disease, provide a concise potential cause and a concise recommended solution. Respond ONLY with a valid JSON object containing 'cause' and 'solution' keys. Do not include any introductory text, markdown formatting, or explanations outside the JSON structure.";
-    const userQuery = `Plant Disease: ${diseaseName}`;
-
-    // Define the expected JSON structure
-    const jsonSchema = {
-      type: "OBJECT",
-      properties: {
-        cause: { type: "STRING" },
-        solution: { type: "STRING" },
-      },
-      required: ["cause", "solution"],
-    };
-
-    const payload = {
-      contents: [{ parts: [{ text: userQuery }] }],
-      systemInstruction: {
-        parts: [{ text: systemPrompt }],
-      },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: jsonSchema,
-        // Optional: Adjust temperature for creativity vs. factuality
-        // temperature: 0.5
-      },
-    };
-
     try {
-      const response = await fetchWithBackoff(apiUrl, {
-        // Use fetchWithBackoff
+      const API_URL = env.endpoint.replace("predict/", "disease-info/");
+
+      const response = await fetchWithBackoff(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ disease_name: diseaseName }),
       });
 
       const result = await response.json();
-      console.log("Gemini API Response:", result); // Log the full response for debugging
+      console.log("Disease Info Response:", JSON.stringify(result, null, 2));
 
-      const candidate = result?.candidates?.[0];
-      const contentPart = candidate?.content?.parts?.[0];
+      if (result.error) {
+        throw new Error(result.error);
+      }
 
-      if (contentPart?.text) {
-        try {
-          // Parse the JSON string returned by Gemini
-          const parsedJson: DiseaseInfo = JSON.parse(contentPart.text);
-          if (parsedJson.cause && parsedJson.solution) {
-            setDiseaseInfo(parsedJson);
-          } else {
-            throw new Error("Invalid JSON structure received from API.");
-          }
-        } catch (parseError) {
-          console.error("Error parsing Gemini JSON response:", parseError);
-          console.error("Received text:", contentPart.text); // Log the text that failed parsing
-          throw new Error(
-            "Could not parse disease information from the API response."
-          );
-        }
+      if (result.cause && result.solution) {
+        setDiseaseInfo(result);
       } else {
-        // Handle cases where response might be blocked or empty
-        const safetyReason = candidate?.finishReason;
-        const safetyRatings = candidate?.safetyRatings;
-        console.warn(
-          "Gemini response missing text. Reason:",
-          safetyReason,
-          "Ratings:",
-          safetyRatings
-        );
-        throw new Error(
-          `Could not get valid disease information. Reason: ${
-            safetyReason || "Empty response"
-          }`
-        );
+        throw new Error("Invalid response format from API.");
       }
     } catch (err: any) {
       console.error("Error fetching disease info:", err);
